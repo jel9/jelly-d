@@ -1,0 +1,10 @@
+{
+	"authors": [
+		"jel9"
+	],
+	"copyright": "Copyright © 2025, jel9",
+	"description": "Bunch of D utilities and graphics related stuff.",
+	"license": "BSL-1.0",
+    "homepage": "https://github.com/jel9/jelly-d",
+	"name": "jelly"
+}
