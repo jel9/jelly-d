@@ -67,8 +67,8 @@ struct Value
 /// Supports nested objects, lists, strings, and numbers.
 struct Parser
 {
-    private string src;  /// Source configuration text
-    private size_t pos;  /// Current position in the source text
+    private string src;
+    private size_t pos;
 
     /// Constructs a parser for the given configuration text.
     this(string text)
@@ -84,39 +84,38 @@ struct Parser
         while (!eof)
         {
             skip();
-            if (eof)
+            if (eof || peek == '}')
                 break;
 
-            string key = parseKey();
+            auto key = parseKey();
             skip();
 
+            Value val;
             if (peek == '{')
             {
                 next();
                 skip();
                 auto obj = parse();
-                enforce(peek == '}', "Unmatched '{' in " ~ key);
+                enforce(peek == '}', "Unmatched '{' in object literal");
                 next();
-                root[key] = Value(Variant(obj), ValueType.Object);
+                val = Value(Variant(obj), ValueType.Object);
             }
             else
             {
                 enforce(next() == '=', "Expected '=' after " ~ key);
                 skip();
-                auto v = parseValue();
-                root[key] = v;
+                val = parseValue();
             }
+            root[key] = val;
         }
         return root;
     }
 
-    /// Parses a value from the configuration text.
-    /// Recognizes strings, lists, objects, and numbers.
+    /// Parses a value: string, list, object, or number.
     private Value parseValue()
     {
         enforce(!eof, "Unexpected EOF");
-        auto c = peek;
-
+        char c = peek;
         if (c == '"')
             return parseString();
         if (c == '[')
@@ -126,7 +125,7 @@ struct Parser
             next();
             skip();
             auto obj = parse();
-            enforce(peek == '}', "Unmatched '{'");
+            enforce(peek == '}', "Unmatched '{' in inline object");
             next();
             return Value(Variant(obj), ValueType.Object);
         }
@@ -136,20 +135,20 @@ struct Parser
         assert(0, "Invalid value start: '" ~ c ~ "' at pos " ~ to!string(pos));
     }
 
-    /// Parses a string literal value.
+    /// Parses a string literal.
     private Value parseString()
     {
-        next(); // skip opening quote
+        next();
         size_t start = pos;
         while (!eof && peek != '"')
             next();
         enforce(!eof, "Unterminated string literal");
         auto s = src[start .. pos];
-        next(); // skip closing quote
+        next();
         return Value(Variant(s), ValueType.String);
     }
 
-    /// Parses a numeric value (integer or floating point).
+    /// Parses a numeric literal.
     private Value parseNumber()
     {
         size_t start = pos;
@@ -157,14 +156,14 @@ struct Parser
             next();
         while (!eof && (isDigit(peek) || peek == '.'))
             next();
-        double num = src[start .. pos].to!double;
-        return Value(Variant(num), ValueType.Number);
+        double n = src[start .. pos].to!double;
+        return Value(Variant(n), ValueType.Number);
     }
 
-    /// Parses a list of values (comma-separated, in square brackets).
+    /// Parses a list [v, v, ...].
     private Value parseList()
     {
-        next(); // skip '['
+        next();
         skip();
         Value[] arr;
         while (!eof && peek != ']')
@@ -177,12 +176,12 @@ struct Parser
                 skip();
             }
         }
-        enforce(peek == ']', "Unterminated list");
-        next(); // skip ']'
+        enforce(peek == ']', "Unterminated list literal");
+        next();
         return Value(Variant(arr), ValueType.List);
     }
 
-    /// Parses a key (identifier) for an object entry.
+    /// Parses an identifier key.
     private string parseKey()
     {
         size_t start = pos;
@@ -193,48 +192,27 @@ struct Parser
         return src[start .. pos];
     }
 
-    /// Skips whitespace and comments in the configuration text.
     private void skip()
     {
         while (!eof)
         {
-            if (isWhite(peek))
-            {
-                next();
-                continue;
-            }
+            if (isWhite(peek)) { next(); continue; }
             if (peek == '#')
             {
                 next();
-                while (!eof && peek != '\n')
-                    next();
+                while (!eof && peek != '\n') next();
                 continue;
             }
             break;
         }
     }
 
-    /// Returns the current character, or '\0' if at end of file.
-    @property private char peek() const
-    {
-        return eof ? '\0' : src[pos];
-    }
-
-    /// Advances to the next character and returns the current one.
-    private char next()
-    {
-        return src[pos++];
-    }
-
-    /// Returns true if parsing has reached the end of the source text.
-    @property private bool eof() const
-    {
-        return pos >= src.length;
-    }
+    @property private char peek() const { return eof ? '\0' : src[pos]; }
+    private char next() { return src[pos++]; }
+    @property private bool eof() const { return pos >= src.length; }
 }
 
 /// Compile-time configuration parser (CTFE).
-/// Usage: enum parsedConfig = ctfeParse!"key = 123";
 enum ctfeParse(string text) = Parser(text).parse();
 
 import std.traits;
@@ -253,13 +231,12 @@ template GenerateAccessors(T)
         else static if (hasUDA!(T, name, Default))
         {
             enum def = getUDAs!(T, name, Default)[0].val;
+            enum key = name;
             mixin(templateAccessorWithDefault!(T.stringof, name, FT.stringof, key, def));
         }
     }
 }
 
-/// Generates a getter accessor for the given config key.
-/// Throws if the key is missing.
 private string templateAccessor(string structName, string fieldName, string fieldType, string key)
 {
     immutable tpl = q{
@@ -275,7 +252,6 @@ private string templateAccessor(string structName, string fieldName, string fiel
     return tpl.format(fieldType, structName, fieldName, key, key, key, fieldType, fieldType);
 }
 
-/// Generates a getter accessor with a default value for the given config key.
 private string templateAccessorWithDefault(string structName, string fieldName, string fieldType, string key, string def)
 {
     immutable tpl = q{
@@ -288,4 +264,28 @@ private string templateAccessorWithDefault(string structName, string fieldName, 
     }
     };
     return tpl.format(fieldType, structName, fieldName, key, fieldType, key, fieldType, fieldType, def);
+}
+
+unittest {
+    string cfgText = `
+        name = "Jelly"
+        enabled = 1
+        feature_on = 0
+    `;
+    auto parser = Parser(cfgText);
+    Config cfg = parser.parse();
+    assert(cfg["enabled"].data.get!double == 1);
+    assert(cfg["feature_on"].data.get!double == 0);
+}
+
+unittest {
+    string cfgText = `
+        name = "Jelly"
+        data = {
+            is_cool = 1
+        }
+    `;
+    auto parser = Parser(cfgText);
+    Config cfg = parser.parse();
+    assert(cfg["data"].data.get!Config["is_cool"].data.get!double == 1);
 }
