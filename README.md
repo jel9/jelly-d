@@ -1,5 +1,7 @@
 ## JellyD
 
+[![Run all D Tests](https://github.com/jel9/jelly-d/actions/workflows/test.yml/badge.svg)](https://github.com/jel9/jelly-d/actions/workflows/test.yml)
+
 Bunch of D utilities and graphics related stuff.
 
 ### Modules
